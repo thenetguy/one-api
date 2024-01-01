@@ -22,7 +22,7 @@ jobs:
 
       - name: Save version info
         run: |
-          git describe --tags > 1.0
+           git describe --tags > VERSION 2>/dev/null || echo "0.0.0" > VERSION
 
       - name: Translate
         run: |
