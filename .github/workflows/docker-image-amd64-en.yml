@@ -22,7 +22,7 @@ jobs:
 
       - name: Save version info
         run: |
-          git describe --tags > VERSION 
+          git describe --tags > 1.0
 
       - name: Translate
         run: |
