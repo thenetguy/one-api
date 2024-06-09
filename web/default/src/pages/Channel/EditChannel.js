@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Form, Header, Input, Message, Segment } from 'semantic-ui-react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { API, getChannelModels, showError, showInfo, showSuccess, verifyJSON } from '../../helpers';
+import { API, copy, getChannelModels, showError, showInfo, showSuccess, verifyJSON } from '../../helpers';
 import { CHANNEL_OPTIONS } from '../../constants';
 
 const MODEL_MAPPING_EXAMPLE = {
@@ -54,6 +54,12 @@ const EditChannel = () => {
   const [basicModels, setBasicModels] = useState([]);
   const [fullModels, setFullModels] = useState([]);
   const [customModel, setCustomModel] = useState('');
+  const [config, setConfig] = useState({
+    region: '',
+    sk: '',
+    ak: '',
+    user_id: ''
+  });
   const handleInputChange = (e, { name, value }) => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
     if (name === 'type') {
@@ -63,6 +69,10 @@ const EditChannel = () => {
       }
       setBasicModels(localModels);
     }
+  };
+
+  const handleConfigChange = (e, { name, value }) => {
+    setConfig((inputs) => ({ ...inputs, [name]: value }));
   };
 
   const loadChannel = async () => {
@@ -83,6 +93,10 @@ const EditChannel = () => {
         data.model_mapping = JSON.stringify(JSON.parse(data.model_mapping), null, 2);
       }
       setInputs(data);
+      if (data.config !== '') {
+        setConfig(JSON.parse(data.config));
+      }
+      setBasicModels(getChannelModels(data.type));
     } else {
       showError(message);
     }
@@ -99,9 +113,6 @@ const EditChannel = () => {
       }));
       setOriginModelOptions(localModelOptions);
       setFullModels(res.data.data.map((model) => model.id));
-      setBasicModels(res.data.data.filter((model) => {
-        return model.id.startsWith('gpt-3') || model.id.startsWith('text-');
-      }).map((model) => model.id));
     } catch (error) {
       showError(error.message);
     }
@@ -137,12 +148,20 @@ const EditChannel = () => {
   useEffect(() => {
     if (isEdit) {
       loadChannel().then();
+    } else {
+      let localModels = getChannelModels(inputs.type);
+      setBasicModels(localModels);
     }
     fetchModels().then();
     fetchGroups().then();
   }, []);
 
   const submit = async () => {
+    if (inputs.key === '') {
+      if (config.ak !== '' && config.sk !== '' && config.region !== '') {
+        inputs.key = `${config.ak}|${config.sk}|${config.region}`;
+      }
+    }
     if (!isEdit && (inputs.name === '' || inputs.key === '')) {
       showInfo('请填写渠道名称和渠道密钥！');
       return;
@@ -155,12 +174,12 @@ const EditChannel = () => {
       showInfo('模型映射必须是合法的 JSON 格式！');
       return;
     }
-    let localInputs = inputs;
+    let localInputs = {...inputs};
     if (localInputs.base_url && localInputs.base_url.endsWith('/')) {
       localInputs.base_url = localInputs.base_url.slice(0, localInputs.base_url.length - 1);
     }
     if (localInputs.type === 3 && localInputs.other === '') {
-      localInputs.other = '2023-06-01-preview';
+      localInputs.other = '2024-03-01-preview';
     }
     if (localInputs.type === 18 && localInputs.other === '') {
       localInputs.other = 'v2.1';
@@ -168,6 +187,7 @@ const EditChannel = () => {
     let res;
     localInputs.models = localInputs.models.join(',');
     localInputs.group = localInputs.groups.join(',');
+    localInputs.config = JSON.stringify(config);
     if (isEdit) {
       res = await API.put(`/api/channel/`, { ...localInputs, id: parseInt(channelId) });
     } else {
@@ -214,6 +234,7 @@ const EditChannel = () => {
               label='类型'
               name='type'
               required
+              search
               options={CHANNEL_OPTIONS}
               value={inputs.type}
               onChange={handleInputChange}
@@ -241,7 +262,7 @@ const EditChannel = () => {
                   <Form.Input
                     label='默认 API 版本'
                     name='other'
-                    placeholder={'请输入默认 API 版本，例如：2023-06-01-preview，该配置可以被实际的请求查询参数所覆盖'}
+                    placeholder={'请输入默认 API 版本，例如：2024-03-01-preview，该配置可以被实际的请求查询参数所覆盖'}
                     onChange={handleInputChange}
                     value={inputs.other}
                     autoComplete='new-password'
@@ -334,6 +355,20 @@ const EditChannel = () => {
               </Form.Field>
             )
           }
+          {
+            inputs.type === 34 && (
+              <Message>
+                对于 Coze 而言，模型名称即 Bot ID，你可以添加一个前缀 `bot-`，例如：`bot-123456`。
+              </Message>
+            )
+          }
+          {
+            inputs.type === 40 && (
+              <Message>
+                对于豆包而言，需要手动去 <a target="_blank" href="https://console.volcengine.com/ark/region:ark+cn-beijing/endpoint">模型推理页面</a> 创建推理接入点，以接入点名称作为模型名称，例如：`ep-20240608051426-tkxvl`。
+              </Message>
+            )
+          }
           <Form.Field>
             <Form.Dropdown
               label='模型'
@@ -342,6 +377,10 @@ const EditChannel = () => {
               required
               fluid
               multiple
+              search
+              onLabelClick={(e, { value }) => {
+                copy(value).then();
+              }}
               selection
               onChange={handleInputChange}
               value={inputs.models}
@@ -352,7 +391,7 @@ const EditChannel = () => {
           <div style={{ lineHeight: '40px', marginBottom: '12px' }}>
             <Button type={'button'} onClick={() => {
               handleInputChange(null, { name: 'models', value: basicModels });
-            }}>填入基础模型</Button>
+            }}>填入相关模型</Button>
             <Button type={'button'} onClick={() => {
               handleInputChange(null, { name: 'models', value: fullModels });
             }}>填入所有模型</Button>
@@ -388,7 +427,52 @@ const EditChannel = () => {
             />
           </Form.Field>
           {
-            batch ? <Form.Field>
+            inputs.type === 33 && (
+              <Form.Field>
+                <Form.Input
+                  label='Region'
+                  name='region'
+                  required
+                  placeholder={'region，e.g. us-west-2'}
+                  onChange={handleConfigChange}
+                  value={config.region}
+                  autoComplete=''
+                />
+                <Form.Input
+                  label='AK'
+                  name='ak'
+                  required
+                  placeholder={'AWS IAM Access Key'}
+                  onChange={handleConfigChange}
+                  value={config.ak}
+                  autoComplete=''
+                />
+                <Form.Input
+                  label='SK'
+                  name='sk'
+                  required
+                  placeholder={'AWS IAM Secret Key'}
+                  onChange={handleConfigChange}
+                  value={config.sk}
+                  autoComplete=''
+                />
+              </Form.Field>
+            )
+          }
+          {
+            inputs.type === 34 && (
+              <Form.Input
+                label='User ID'
+                name='user_id'
+                required
+                placeholder={'生成该密钥的用户 ID'}
+                onChange={handleConfigChange}
+                value={config.user_id}
+                autoComplete=''
+              />)
+          }
+          {
+            inputs.type !== 33 && (batch ? <Form.Field>
               <Form.TextArea
                 label='密钥'
                 name='key'
@@ -409,10 +493,25 @@ const EditChannel = () => {
                 value={inputs.key}
                 autoComplete='new-password'
               />
-            </Form.Field>
+            </Form.Field>)
           }
           {
-            !isEdit && (
+            inputs.type === 37 && (
+              <Form.Field>
+                <Form.Input
+                  label='Account ID'
+                  name='user_id'
+                  required
+                  placeholder={'请输入 Account ID，例如：d8d7c61dbc334c32d3ced580e4bf42b4'}
+                  onChange={handleConfigChange}
+                  value={config.user_id}
+                  autoComplete=''
+                />
+              </Form.Field>
+            )
+          }
+          {
+            inputs.type !== 33 && !isEdit && (
               <Form.Checkbox
                 checked={batch}
                 label='批量创建'
@@ -422,7 +521,7 @@ const EditChannel = () => {
             )
           }
           {
-            inputs.type !== 3 && inputs.type !== 8 && inputs.type !== 22 && (
+            inputs.type !== 3 && inputs.type !== 33 && inputs.type !== 8 && inputs.type !== 22 && (
               <Form.Field>
                 <Form.Input
                   label='代理'
